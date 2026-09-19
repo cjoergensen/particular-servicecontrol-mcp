@@ -1,0 +1,21 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <RootNamespace>Cjoergensen.ServiceControl.Mcp</RootNamespace>
+    <AssemblyName>Cjoergensen.ServiceControl.Mcp.Core</AssemblyName>
+    <Description>Core library of an unofficial MCP server for Particular ServiceControl: ServiceControl API clients, authentication and MCP tools.</Description>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="ModelContextProtocol" />
+    <PackageReference Include="Microsoft.Extensions.Http" />
+    <PackageReference Include="Microsoft.Extensions.Options.DataAnnotations" />
+    <PackageReference Include="Microsoft.Extensions.Configuration.Binder" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="Cjoergensen.ServiceControl.Mcp.Core.Tests" />
+    <InternalsVisibleTo Include="Cjoergensen.ServiceControl.Mcp.IntegrationTests" />
+  </ItemGroup>
+
+</Project>

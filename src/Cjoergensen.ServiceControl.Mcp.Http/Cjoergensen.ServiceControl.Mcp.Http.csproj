@@ -1,0 +1,16 @@
+<Project Sdk="Microsoft.NET.Sdk.Web">
+
+  <PropertyGroup>
+    <RootNamespace>Cjoergensen.ServiceControl.Mcp.Http</RootNamespace>
+    <AssemblyName>Cjoergensen.ServiceControl.Mcp.Http</AssemblyName>
+    <Description>Unofficial MCP server (Streamable HTTP) for Particular ServiceControl, for shared use by several people or agents.</Description>
+    <InvariantGlobalization>true</InvariantGlobalization>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="ModelContextProtocol.AspNetCore" />
+    <PackageReference Include="Microsoft.AspNetCore.Authentication.JwtBearer" />
+    <ProjectReference Include="..\Cjoergensen.ServiceControl.Mcp.Core\Cjoergensen.ServiceControl.Mcp.Core.csproj" />
+  </ItemGroup>
+
+</Project>
