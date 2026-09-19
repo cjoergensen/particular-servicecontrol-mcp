@@ -184,25 +184,206 @@ Set environment variables (prefix `SERVICECONTROL_MCP_`) or command-line argumen
 
 ## Authentication
 
-ServiceControl authenticates with standard OIDC JWT bearer tokens (any OIDC-compliant provider) and has no machine-to-machine mechanism of
-its own, so this server needs a token for the audience your instance expects. If ServiceControl authentication is disabled (the default) no
-credentials are needed. Otherwise pick how the server gets one; `Auto` chooses from what you configure, most specific first:
+**If your ServiceControl has authentication turned off (its default), you need no credentials. Skip this section.**
 
-| You configure | Mode | What happens |
+Otherwise, keep one idea in mind: there are **two separate hops**, and they are configured separately.
+
+```
+ MCP client  ───────────────▶  this MCP server  ───────────────▶  ServiceControl
+ (Claude, Copilot ...)   hop 1                    hop 2
+                         "may this caller use     "which identity does this server
+                          the MCP server?"         present to ServiceControl?"
+```
+
+| | Hop 1: caller → this server | Hop 2: this server → ServiceControl |
 |---|---|---|
-| `Auth__Token` | static token | Uses the token as is. Short-lived; for development and CI. |
-| `Auth__TokenCommand` | token command | Runs your command (for example the Azure CLI) whenever a token is needed, caching until it expires. Reuses a login you already have; needs nothing registered for this server at the identity provider. |
-| `Auth__ClientId` + `Auth__ClientSecret` | client credentials | The server signs in as itself. Suits shared or unattended use. ServiceControl sees the roles granted to that client, not to a person. |
-| `Auth__ClientId` only | device code | A person signs in with their own browser, so ServiceControl sees *their* roles and audit trail. See below. |
+| **Local server (stdio)** | **Nothing to configure.** Your MCP client starts the server as a child process on your machine, as you. There is no network hop to protect. | `Auth__*` settings |
+| **Shared server (HTTP)** | `Http__*` settings: callers present a token issued *for this server* | `Auth__*` settings |
 
-**Device code.** A stdio server cannot reliably show a prompt, so it never blocks: the first tool call fails with a message such as
-"Sign-in is required. Ask the user to open https://idp.example/device?user_code=ABCD-EFGH ...", which the agent relays to you. Once you approve, repeat
-the request and it succeeds; a refresh token (when the provider issues one) keeps the session going. The same instructions are written to the
-server's log (stderr). The client must be a *public* client with the device authorization grant enabled. By default it asks for the scopes
-ServiceControl advertises for its own sign-in; if the provider refuses long-lived (`offline_access`) tokens the server retries without it.
+Everything called `Auth__…` is about hop 2. Everything called `Http__…` is about hop 1 and exists only in the HTTP host.
 
-The authority, and the scopes for device code, are read from ServiceControl's anonymous `GET /api/authentication/configuration`, so a typical setup
-needs only the ServiceControl URL and a client. Client secrets belong in the environment, never on a command line.
+### How this compares with ServicePulse
+
+ServicePulse (see its [authentication docs](https://docs.particular.net/servicepulse/security/configuration/authentication)) is a browser app. It reads the
+sign-in details ServiceControl publishes, redirects you to the identity provider (authorization code flow with PKCE), you sign in, and
+ServicePulse calls ServiceControl with a token that is *yours*. This server cannot show a browser page on its own, so it offers the closest
+equivalent for each way of running it:
+
+| | ServicePulse-like behaviour (ServiceControl sees *you*) | Available today |
+|---|---|---|
+| Local (stdio) | **Device code**: the agent gives you a link and a code, you sign in in your browser, ServiceControl sees you. It is a code, not a redirect, and you must register a client at your identity provider for it. | Yes, [device code](#device-code-a-person-signs-in) |
+| Shared (HTTP) | **Token exchange**: your MCP client signs you in through your identity provider's browser page and the server swaps your token for a ServiceControl one. This is the same "you sign in, ServiceControl sees you" result. | Yes, [token exchange](#shared-server-http-both-hops); the client-driven browser login has only been verified up to the 401 challenge, not end to end with a real client |
+| Either | A plain browser login (redirect, no code to type) for the local server | **No**, not implemented |
+
+### Step 1: find out what your ServiceControl expects
+
+ServiceControl publishes its sign-in details anonymously:
+
+```bash
+curl -s https://servicecontrol.example.com/api/authentication/configuration
+```
+
+```json
+{ "enabled": true, "authority": "https://idp.example/realms/platform", "audience": "api://servicecontrol",
+  "role_based_authorization_enabled": true, "client_id": "servicepulse", "scopes": "openid profile offline_access", "api_scopes": "..." }
+```
+
+- `"enabled": false` - nothing more to do.
+- `authority` - the identity provider ServiceControl trusts. This server uses it automatically; you only set `Auth__Authority` if it is not reachable from where this server runs.
+- `audience` - every token sent to ServiceControl must be issued for this value.
+- `role_based_authorization_enabled` - when true, the identity needs the `reader` role to read, and `writer` to retry, archive or dismiss.
+- `client_id` is **ServicePulse's** client, registered as a single-page app with ServicePulse's own redirect URIs. This server cannot reuse it; the modes that need a client use one you register for this server.
+
+### Step 2: choose how this server signs in to ServiceControl (hop 2)
+
+Pick the row that matches your situation. `Auth__Mode` is normally left on `Auto`, which chooses from what you set, most specific first
+(token, then token command, then client id + secret, then client id alone).
+
+| I want to... | Mode | ServiceControl sees | You set |
+|---|---|---|---|
+| Try it, or run in CI, with a token I already have | static token | whoever the token belongs to | `Auth__Token` |
+| Reuse a login I already have (`az login`, another CLI) | token command | you | `Auth__TokenCommand` (+ arguments) |
+| Have each person sign in as themselves (local server) | device code | that person | `Auth__ClientId` |
+| Run unattended, or one shared identity for everyone | client credentials | the server's own client (a "service principal") | `Auth__ClientId` + `Auth__ClientSecret` |
+| Shared HTTP server, ServiceControl should see each caller | token exchange | each caller | `Auth__Mode=TokenExchange` + client id and secret |
+
+Whatever you choose, the token that reaches ServiceControl must come from the identity provider in `authority`, be issued for `audience`,
+and carry the role(s) above. Most "401" and "403" problems are one of those three.
+
+#### Static token
+
+For development and CI. Short-lived, so it stops working when it expires.
+
+```json
+"env": { "SERVICECONTROL_MCP_Url": "https://servicecontrol.example.com", "SERVICECONTROL_MCP_Auth__Token": "eyJhbGciOi..." }
+```
+
+#### Token command
+
+The server runs your command whenever it needs a token, caches the result until it expires, and runs it again afterwards. Nothing needs to be
+registered for this server at the identity provider, because it borrows a login you already have. The command is run directly, never through a shell,
+and each argument is its own numbered setting.
+
+```json
+"env": {
+  "SERVICECONTROL_MCP_Url": "https://servicecontrol.example.com",
+  "SERVICECONTROL_MCP_Auth__TokenCommand": "az",
+  "SERVICECONTROL_MCP_Auth__TokenCommandArguments__0": "account",
+  "SERVICECONTROL_MCP_Auth__TokenCommandArguments__1": "get-access-token",
+  "SERVICECONTROL_MCP_Auth__TokenCommandArguments__2": "--resource",
+  "SERVICECONTROL_MCP_Auth__TokenCommandArguments__3": "api://servicecontrol",
+  "SERVICECONTROL_MCP_Auth__TokenCommandArguments__4": "--query",
+  "SERVICECONTROL_MCP_Auth__TokenCommandArguments__5": "accessToken",
+  "SERVICECONTROL_MCP_Auth__TokenCommandArguments__6": "-o",
+  "SERVICECONTROL_MCP_Auth__TokenCommandArguments__7": "tsv"
+}
+```
+
+#### Device code (a person signs in)
+
+At the identity provider, register a **public** client for this server with the **device authorization grant** enabled. Then set only its id:
+
+```json
+"env": { "SERVICECONTROL_MCP_Url": "https://servicecontrol.example.com", "SERVICECONTROL_MCP_Auth__ClientId": "servicecontrol-mcp" }
+```
+
+How it feels: your first request fails with a message like *"Sign-in is required. Ask the user to open https://idp.example/device?user_code=ABCD-EFGH ..."*
+and the agent relays it to you. Open the link, sign in, then ask again. It works from then on, and a refresh token (if your provider issues one) keeps the
+session going. The server never blocks waiting for you, because a stdio server has no reliable way to show a prompt. The same instructions go to the
+server's log (stderr).
+
+It asks for the scopes ServiceControl advertises for its own sign-in. If the provider refuses long-lived (`offline_access`) tokens, it retries without them.
+**Use this with the local server only.** In the shared HTTP host there is one server-wide session, so one person's sign-in would be used for everyone;
+use token exchange there.
+
+#### Client credentials (the server signs in as itself)
+
+Register a **confidential** client, give its service account the `reader` (and, for write tools, `writer`) role, and make sure its tokens carry
+ServiceControl's `audience`.
+
+```json
+"env": {
+  "SERVICECONTROL_MCP_Url": "https://servicecontrol.example.com",
+  "SERVICECONTROL_MCP_Auth__ClientId": "servicecontrol-mcp",
+  "SERVICECONTROL_MCP_Auth__ClientSecret": "..."
+}
+```
+
+Providers differ in how a token gets the right audience: Keycloak uses an audience mapper on the client; Microsoft Entra ID wants
+`Auth__Scope=api://{servicecontrol-app}/.default`; Auth0 wants `Auth__Audience`. Only Keycloak has been tested. The secret belongs in the environment or a secret store, never on a command line.
+
+### Shared server (HTTP): both hops
+
+Run the HTTP host (`src/Cjoergensen.ServiceControl.Mcp.Http`) when several people or agents share one server. Now both hops exist.
+
+#### The recommended setup, in plain words
+
+This is the setup where ServiceControl sees each *person*, as it does with ServicePulse.
+
+1. **ServiceControl is set up for authentication as usual.** People hold ServiceControl's own roles (`reader`, `writer`) there, exactly as for ServicePulse. Nothing about that changes.
+2. **This MCP server gets its own app registration** at the identity provider. It is *not* a second set of roles. It does two jobs: it is the "audience" a person's
+   sign-in is issued for, and it is what the server uses to swap that sign-in for a ServiceControl one (the token exchange).
+3. **People sign in through their MCP client** (Claude Code, Claude Desktop, Copilot ...). The server has no login page of its own:
+   1. You add the server's address to your MCP client, for example `https://mcp.example.com/mcp`.
+   2. The client calls it with no token and gets `401`. The reply points to the server's metadata, which names your identity provider.
+   3. The client opens your **browser** on the normal company login page (authorization code with PKCE, like ServicePulse). You sign in, MFA included.
+   4. The identity provider gives the client a token *for the MCP server*. The client stores and renews it; you sign in again only when it lapses.
+   5. Every tool call carries that token.
+4. **The server swaps it** at the identity provider, using its own app registration, for a token *for ServiceControl* that still names you and carries your roles.
+   ServiceControl checks your roles and logs your name.
+
+```
+you ─ browser sign-in ─▶ identity provider ─ token for the MCP server ─▶ MCP client ─▶ MCP server
+                                                                                          │ swap (own app registration)
+                                                                                          ▼
+                                            ServiceControl ◀─ token for ServiceControl, still you ─ identity provider
+```
+
+The server never passes your MCP-server token on, and a token issued for ServiceControl itself is refused by the MCP server.
+
+Two things to know:
+- Whether **your MCP client** supports this browser sign-in varies, and the flow has been verified only as far as the `401` and the metadata, not with a real client
+  completing a login. If a client cannot do it, the fallback for development is pasting a short-lived token into the client's header settings.
+- Some identity providers do not let a client register itself on the fly (Microsoft Entra ID is one). Then you register a client for your MCP clients and
+  give its id to the MCP client. The Entra example below shows this.
+
+The next two subsections give the detail behind the same idea.
+
+#### The two hops in detail
+
+**Hop 1, callers to this server.** The HTTP host is an OAuth 2.0 *resource server*, as the MCP specification requires. Callers present a bearer token
+issued **for this server** (`Http__Audience`), and the server checks issuer, signature, lifetime and audience on every request. It also publishes its
+protected resource metadata (RFC 9728), so an MCP client can find your identity provider and start the browser sign-in by itself. A token issued for
+ServiceControl itself is refused here.
+
+**Hop 2, this server to ServiceControl.** The server **never forwards the caller's token**: it was issued for the MCP server, and the MCP specification
+forbids passing it on ("token passthrough"). Instead it does one of two things:
+
+| | Service principal | Token exchange |
+|---|---|---|
+| How | The server signs in as itself: `Auth__ClientId` + `Auth__ClientSecret` (or a token, or a command) | The server swaps each caller's token at the identity provider for one for ServiceControl: `Auth__Mode=TokenExchange` |
+| ServiceControl sees | The service principal, for every caller | The caller: their roles, their name in ServiceControl's audit log |
+| Who limits what a caller may do | **This server**, from the roles in the caller's own token (`Http__RolesClaim`); a caller with no `reader`/`writer` role gets nothing | ServiceControl, as for any user; the tools offered are what that person may use |
+| Works with | Any OIDC provider | Providers with token exchange: Keycloak (RFC 8693, the default `Standard` style) and Microsoft Entra ID (on-behalf-of, with `Auth__Scope`; not yet tested against a real tenant) |
+| Choose it when | You want simple setup and a shared identity is acceptable | ServiceControl's audit log must show who did what (**this is the ServicePulse-like choice**) |
+
+Because a service principal hides the caller from ServiceControl, the server keeps its own record: every state-changing call is logged as
+`AUDIT change: caller alice (via mcp-cli) called retry_failed_message -> ok`, and reads at debug level.
+
+The settings, an example, the startup safety checks, identity provider setup (Keycloak and Microsoft Entra ID) and verification steps are in
+[Running it for a team](#running-it-for-a-team-streamable-http).
+
+### When something goes wrong
+
+| What you see | Meaning | Fix |
+|---|---|---|
+| `ServiceControl rejected the credentials (401 Unauthorized)` | The token is missing, expired, or not for ServiceControl's `audience` | Check `audience` in Step 1; check `Auth__*` gives a token for it. With `Auth__Mode` unset and nothing configured, no token is sent at all |
+| `ServiceControl denied the request (403 Forbidden)` | Signed in, but the identity lacks the role | Give the person or client `reader` (and `writer` for write tools). With a service principal, the roles are the client's |
+| `Sign-in is required. Ask the user to open ...` | Device code is waiting for you | Open the link, sign in, ask again |
+| `Could not obtain a token for ServiceControl` | The identity provider refused the request | The message includes its reason: usually a wrong client id/secret, a client without the device grant, or a missing `Auth__Scope` |
+| Retry/archive tools are missing | Not a bug: writes are off, or your role is `reader` | Set `EnableWrites`, and use an identity with `writer` |
+| HTTP host refuses to start | An unsafe configuration | The message says which setting to fix |
+| A certificate error | ServiceControl or the identity provider uses a private CA | See [Private certificate authorities](#private-certificate-authorities) |
 
 ### Private certificate authorities
 
@@ -213,24 +394,10 @@ rejected with a message explaining the certificate problem.
 ## Running it for a team (Streamable HTTP)
 
 The stdio server runs on your own machine as you. For one server that several people or agents share, run the HTTP host
-(`src/Cjoergensen.ServiceControl.Mcp.Http`). It is an OAuth 2.0 *resource server*, as the MCP specification requires: callers present a bearer token
-issued **for this server**, it publishes its protected resource metadata (RFC 9728) so MCP clients can find the identity provider by themselves, and
-it validates every token (issuer, signature, lifetime, audience).
+(`src/Cjoergensen.ServiceControl.Mcp.Http`). Read [Authentication](#authentication) first: it explains the two hops (caller → this server, and
+this server → ServiceControl) and how to choose between *service principal* and *token exchange*. This section is the settings reference and a worked example.
 
-**It never forwards a caller's token.** A token issued for the MCP server is not one ServiceControl should see, and the MCP specification forbids
-passing it on ("token passthrough"). There are two ways for the server to reach ServiceControl instead:
-
-| | Service principal | Token exchange |
-|---|---|---|
-| How | The server signs in as itself (`Auth__ClientId` + `Auth__ClientSecret`, or a token, or a command) | The server exchanges each caller's token at the identity provider for one for ServiceControl (`Auth__Mode=TokenExchange`) |
-| ServiceControl sees | The service principal | The caller: their roles, their name in ServiceControl's audit log |
-| Who limits what a caller may do | **This server**, from the roles in the caller's own token (`Http__RolesClaim`); a caller with no reader/writer role gets nothing | ServiceControl, as for any user; the tools offered are what that person may use |
-| Works with | Any OIDC provider | Providers with token exchange: Keycloak (RFC 8693, the default style) and Microsoft Entra ID (on-behalf-of, with `Auth__Scope`; not yet tested against a real tenant) |
-
-Because a service principal hides the caller from ServiceControl, the server keeps its own record: every state-changing call is logged as
-`AUDIT change: caller alice (via mcp-cli) called retry_failed_message -> ok`, and reads at debug level.
-
-Minimal configuration (environment variables, prefix `SERVICECONTROL_MCP_`):
+Hop 1 settings (`Http__*`) and hop 2 settings (`Auth__*`) are separate. Minimal configuration (environment variables, prefix `SERVICECONTROL_MCP_`):
 
 | Setting | Meaning |
 |---|---|
@@ -264,11 +431,96 @@ dotnet src/Cjoergensen.ServiceControl.Mcp.Http/bin/Release/net10.0/Cjoergensen.S
 plain HTTP beyond loopback, a non-loopback address with no allowed host names, or token exchange without authentication. The checks read both the
 configured and the actually bound addresses.
 
-**Identity provider checklist.** (1) Register this server as an API/resource and use its identifier as `Http__Audience`; MCP clients discover the
-authorization server from the metadata and request tokens for it. (2) Make sure callers' tokens carry their roles (`reader`, `writer`, `admin`).
-(3) For token exchange, register the server as a confidential client that is allowed to exchange tokens for ServiceControl's audience (on Keycloak: enable
-standard token exchange on the client and add an audience mapper for ServiceControl's client; the integration test realm is a working example in
-`tests/Cjoergensen.ServiceControl.Mcp.IntegrationTests/Platform/KeycloakRealm.cs`).
+### Setting up the identity provider
+
+You need three registrations for the token-exchange setup, whichever provider you use:
+
+| Registration | What it is | Why |
+|---|---|---|
+| **ServiceControl** | The audience and roles you already have for ServiceControl and ServicePulse | The final token must be issued for it and carry `reader`/`writer` |
+| **The MCP server** | A *confidential* client (has a secret) that is also the audience callers' tokens are issued for | Callers' tokens are for it, and it performs the swap. Its id is `Http__Audience` and `Auth__ClientId` |
+| **A client for people's MCP clients** | A *public* client that can do a browser sign-in with PKCE and get tokens for the MCP server | It starts the login. Some MCP clients register themselves; others need this client's id |
+
+**Keycloak** (tested). Enable *standard token exchange* on the MCP server's client, and add an audience mapper to it for ServiceControl's client (otherwise
+Keycloak answers "Requested audience not available"). Keycloak requires the requesting client to be the subject token's audience, so the MCP server's client id is
+also its `Http__Audience`. The people's client gets an audience mapper for the MCP server's client id. A complete working example is
+[`KeycloakRealm.cs`](tests/Cjoergensen.ServiceControl.Mcp.IntegrationTests/Platform/KeycloakRealm.cs), and the settings are the example above with
+`Http__RolesClaim=realm_access.roles`.
+
+#### Example: Microsoft Entra ID
+
+> **Not yet tested against a real tenant.** The on-behalf-of exchange is implemented and unit-tested, but this walkthrough has not been run end to end.
+> Expect to adjust it, and please report what you find.
+
+`{tenant}` is your directory (tenant) id. `{sc-app}` is the ServiceControl app registration's application (client) id, `{mcp-app}` the MCP server's.
+
+**1. ServiceControl's registration.** You already have this if ServiceControl authenticates against Entra. It should have an Application ID URI (`api://{sc-app}`), at least
+one delegated scope (the one ServicePulse uses), and **app roles** `reader`, `writer` (and `admin`). Assign people to those roles under *Enterprise applications →
+ServiceControl → Users and groups*. This is where ServiceControl's permissions live, and it is all you assign per person.
+
+**2. The MCP server's registration.** *App registrations → New registration*, single tenant, name it for example `ServiceControl MCP`. Then:
+
+1. *Certificates & secrets*: create a client secret and put it in your secret store.
+2. *Expose an API*: accept the Application ID URI `api://{mcp-app}` and add a scope, for example `mcp.access` (who can consent: admins and users).
+3. *Manifest*: set the access token version to 2 (`requestedAccessTokenVersion: 2`). Tokens are then issued by `https://login.microsoftonline.com/{tenant}/v2.0`, and their
+   audience (`aud`) is the application id `{mcp-app}` rather than the `api://` form.
+4. *API permissions*: *Add a permission → My APIs → ServiceControl → Delegated*, choose ServiceControl's scope, then **Grant admin consent**. The on-behalf-of exchange
+   fails with a consent error (`AADSTS65001`) without this.
+
+**3. A client for people's MCP clients.** Entra does not support dynamic client registration, so register one. *New registration*, platform *Mobile and desktop applications*
+(a public client), with the redirect address your MCP client uses for its browser sign-in (see its documentation; it is usually a `http://localhost` or `http://127.0.0.1` address).
+Then *API permissions → My APIs → ServiceControl MCP → Delegated → `mcp.access`*. To skip the consent prompt for users, either grant admin consent here or, in the
+MCP server's *Expose an API*, add this client under *Authorized client applications*. Tell your MCP client this client id and your tenant. For example, Claude Code has options for a
+pre-registered client id and callback port (see `claude mcp add --help`).
+
+**4. The server's settings.**
+
+```bash
+export SERVICECONTROL_MCP_Url=https://servicecontrol.example.com
+export SERVICECONTROL_MCP_EnableWrites=true
+
+# Hop 1: callers' tokens (issued by Entra for the MCP server)
+export SERVICECONTROL_MCP_Http__Authority=https://login.microsoftonline.com/{tenant}/v2.0
+export SERVICECONTROL_MCP_Http__Audience={mcp-app}                # what a v2 token's "aud" holds
+export SERVICECONTROL_MCP_Http__Audiences__0=api://{mcp-app}      # the other spelling, accepted too
+export SERVICECONTROL_MCP_Http__Scopes__0=api://{mcp-app}/mcp.access
+export SERVICECONTROL_MCP_Http__ResourceUrl=https://mcp.example.com/mcp
+
+# Hop 2: swap the caller's token for a ServiceControl one (on-behalf-of)
+export SERVICECONTROL_MCP_Auth__Mode=TokenExchange
+export SERVICECONTROL_MCP_Auth__ExchangeStyle=OnBehalfOf
+export SERVICECONTROL_MCP_Auth__Authority=https://login.microsoftonline.com/{tenant}/v2.0
+export SERVICECONTROL_MCP_Auth__ClientId={mcp-app}
+export SERVICECONTROL_MCP_Auth__ClientSecret=...                  # from your secret store, never a command line
+export SERVICECONTROL_MCP_Auth__Scope=api://{sc-app}/.default
+
+export ASPNETCORE_URLS=https://0.0.0.0:8443
+export SERVICECONTROL_MCP_Http__AllowedHosts__0=mcp.example.com
+```
+
+`Http__RolesClaim` is not needed here: with token exchange, ServiceControl reads the `roles` in the swapped token and decides.
+
+**5. Check it.** Follow the checks in [Verify it](#verify-it-one-hop-at-a-time). For Entra, additionally decode a token your MCP client received (for example at jwt.io):
+`iss` should be `https://login.microsoftonline.com/{tenant}/v2.0` and `aud` should be `{mcp-app}`. If `iss` is `https://sts.windows.net/...`, the token version is
+still 1 (step 2.3).
+
+**Likely problems on Entra**
+
+| You see | Cause | Fix |
+|---|---|---|
+| `401` from the MCP server for a valid sign-in | Token version 1, or the audience differs | Step 2.3; check `aud` against `Http__Audience` / `Http__Audiences` |
+| Token exchange fails with `AADSTS65001` | No consent for the MCP app to call ServiceControl | Step 2.4, grant admin consent |
+| `403` from ServiceControl | The person has no app role on ServiceControl | Assign `reader`/`writer` in step 1 |
+| The MCP client cannot find the sign-in | The client expects the authorization server to publish OAuth metadata in a form Entra does not | Entra publishes OpenID Connect metadata. Support depends on the client; not yet tested |
+
+### Verify it, one hop at a time
+
+1. **The server is up:** `curl https://mcp.example.com/healthz` returns `{"status":"ok"}`.
+2. **Hop 1 turns strangers away:** `curl -i https://mcp.example.com/mcp` returns `401`, and its `WWW-Authenticate` header points to the protected resource metadata. Open that
+   address: it names your identity provider, which is what an MCP client uses to start the sign-in.
+3. **Hop 1 turns the wrong token away:** a token issued for ServiceControl itself must also be refused with `401`.
+4. **The whole path:** connect an MCP client, sign in, and call `get_health_overview`. A state-changing call is logged as `AUDIT change: caller alice ... -> ok`, and
+   ServiceControl records the same person.
 
 ## Testing
 
