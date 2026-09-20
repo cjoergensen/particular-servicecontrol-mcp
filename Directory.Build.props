@@ -12,6 +12,13 @@
     <InvariantGlobalization>true</InvariantGlobalization>
   </PropertyGroup>
 
+  <!-- Known-vulnerable packages (direct and transitive) fail the build, since warnings are errors. -->
+  <PropertyGroup>
+    <NuGetAudit>true</NuGetAudit>
+    <NuGetAuditMode>all</NuGetAuditMode>
+    <NuGetAuditLevel>moderate</NuGetAuditLevel>
+  </PropertyGroup>
+
   <PropertyGroup>
     <Authors>cjoergensen</Authors>
     <Copyright>Copyright (c) cjoergensen</Copyright>
