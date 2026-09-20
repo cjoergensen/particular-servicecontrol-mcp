@@ -47,8 +47,9 @@ workload and Keycloak 26.
 
 **Also tried by hand** (2026-09-20): the local server used from GitHub Copilot CLI 1.0.86, with authentication disabled, against the Docker Compose
 platform from [Particular/PlatformContainerExamples](https://github.com/Particular/PlatformContainerExamples) and the test workload as a data source.
-This turned up a real incompatibility that the end-to-end tests could not: the MCP SDK describes optional parameters as `"type": ["string", "null"]`, and
-Copilot did not offer the tools that had them (`list_*`, `search_messages`). The server now advertises plain types (`ToolSchemas`), covered by a unit test.
+Copilot at first did not use the tools that have optional parameters (`list_*`, `search_messages`) although the server answered them correctly when called
+directly. The likely cause, which the end-to-end tests cannot catch, is that the MCP SDK describes optional parameters as `"type": ["string", "null"]`, which some
+clients reject. The server now advertises plain types (`ToolSchemas`), covered by a unit test; the exact cause was not confirmed inside Copilot.
 The full end-to-end suite (48 tests) passed afterwards.
 
 **Known limitations and unverified areas** - please read these before relying on it:
