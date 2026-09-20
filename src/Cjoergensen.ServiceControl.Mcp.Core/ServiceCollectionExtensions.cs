@@ -68,6 +68,11 @@ public static class ServiceCollectionExtensions
                 filters.AddListToolsFilter(next => async (context, cancellationToken) =>
                 {
                     var result = await next(context, cancellationToken).ConfigureAwait(false);
+                    foreach (var tool in result.Tools)
+                    {
+                        tool.InputSchema = ToolSchemas.WithoutNullableTypes(tool.InputSchema);
+                    }
+
                     var snapshot = await context.Services!.GetRequiredService<ToolAccess>().GetAsync(context.User, cancellationToken).ConfigureAwait(false);
                     if (!snapshot.Restricted)
                     {

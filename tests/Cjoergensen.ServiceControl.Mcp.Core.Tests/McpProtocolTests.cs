@@ -116,6 +116,25 @@ public class McpProtocolTests
     }
 
     [Fact]
+    public async Task Tool_input_schemas_use_one_plain_type_per_parameter()
+    {
+        // Some clients and model back-ends reject (and silently drop) a tool whose schema has "type": ["string", "null"].
+        await using var session = await StartAsync(new() { ["MonitoringUrl"] = "http://localhost:33633", ["EnableWrites"] = "true" });
+
+        var tools = await session.Client.ListToolsAsync(cancellationToken: Ct);
+        Assert.NotEmpty(tools);
+        foreach (var tool in tools)
+        {
+            var schema = tool.JsonSchema.GetRawText();
+            Assert.DoesNotContain("\"type\":[", schema.Replace(" ", string.Empty, StringComparison.Ordinal), StringComparison.Ordinal);
+            Assert.DoesNotContain("\"default\":null", schema.Replace(" ", string.Empty, StringComparison.Ordinal), StringComparison.Ordinal);
+        }
+
+        var groups = tools.Single(t => t.Name == "list_failure_groups").JsonSchema.GetProperty("properties").GetProperty("classifier");
+        Assert.Equal("string", groups.GetProperty("type").GetString());
+    }
+
+    [Fact]
     public async Task Calling_a_tool_returns_structured_content()
     {
         await using var session = await StartAsync();
