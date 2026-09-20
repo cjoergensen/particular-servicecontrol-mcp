@@ -10,6 +10,8 @@ Suggested order: A, then the Entra items in B, then the startup check in D, then
 - [ ] **ServiceControl sees the person.** Do a retry as alice. *Done when:* the server's audit line shows alice and ServiceControl's own log shows alice, not a service account.
 - [ ] **Token expiry mid-session.** Let the caller's token expire and confirm the client refreshes it and the exchanged token is renewed, not stale.
 - [ ] **Wrong-token cases.** Confirm each is refused: a token for ServiceControl, a token for another audience, an expired token, a token from another issuer. Part of this is already covered by the secured tests.
+- [ ] **Other MCP clients accept every tool.** Copilot CLI rejected tools whose schemas had nullable types (fixed). Check Claude Code, Claude Desktop, VS Code/Copilot chat and MCP Inspector: every tool listed and callable.
+- [ ] **Write tools from a real agent client.** Retry a whole failure group (the client should ask to confirm the count), follow the asynchronous progress, archive and unarchive, dismiss a custom check, and give a wrong `expectedCount` (nothing may be sent). Note whether the client prompts for the destructive tools. The end-to-end tests cover these; a manual run with a real agent has not been done.
 - [ ] **Metadata correctness.** Check `resource`, `scopes_supported` and the `WWW-Authenticate` header, including behind a reverse proxy with `Http__ResourceUrl` set.
 
 ## B. Identity providers
@@ -32,10 +34,17 @@ Suggested order: A, then the Entra items in B, then the startup check in D, then
 ## D. Code changes still to make and test
 
 - [ ] **Refuse device code in the HTTP host at startup**, with a unit test and an end-to-end check that the server exits with a clear message. (Pending decision.)
+- [ ] **Skip `GET /api/my/routes` when authentication is disabled.** ServiceControl 6.21.0 answers it with `500` in that case; the server falls back to offering every tool but logs a warning on each tool listing. Use `/api/authentication/configuration` (`enabled: false`) to skip the call, with a test.
 - [ ] **Browser login for the local stdio server**, if wanted: loopback redirect, PKCE and a token cache.
 
 ## E. Documentation
 
 - [ ] **Have someone follow the README cold**, with no help, on Keycloak and then Entra. Note every place they stall and fix the text there.
 - [ ] **Compare the discovery JSON example** in the README with a real `/api/authentication/configuration` response from an authenticated ServiceControl. The example is reconstructed from the code.
+- [ ] **Add the demo runner and a manual test guide to the repo** (for example under `samples/`): Particular's compose platform plus a small program over the test workload that produces failures, a failing custom check and a dead heartbeat, with a healthy mode so retries succeed. Today it exists only as a throwaway.
 - [ ] **Update "Known limitations"** as items above are ticked off.
+
+## Done
+
+- [x] **Local server from Copilot CLI, no authentication (2026-09-20).** Copilot CLI 1.0.86, stdio server, against the Docker Compose platform from Particular/PlatformContainerExamples (ServiceControl 6.21.0 with audit and monitoring) and the test workload. Read tools returned correct data (failure groups, health overview, custom checks, heartbeats). Found that the `list_*` tools and `search_messages` were not offered because their schemas used `"type": ["string", "null"]`; fixed by advertising plain types, with a unit test.
+- [x] **Full suite after the fix (2026-09-20).** 176 unit and protocol tests and all 48 end-to-end tests passed.

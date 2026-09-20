@@ -38,14 +38,26 @@ retry?"* The agent reads the health picture, summarises it, and - only after you
 | Shared server (Streamable HTTP, OAuth resource server) | Done |
 | Authentication: static token, token command, client credentials, device code, token exchange | Done; verified against Keycloak |
 | Private/internal CA trust, role-aware tool visibility | Done, verified |
-| Unit and MCP protocol tests | 175, all passing, ~4 s, no Docker |
+| Unit and MCP protocol tests | 176, all passing, ~4 s, no Docker |
 | End-to-end tests | 48, all passing, ~6.5 min, needs Docker |
 | NuGet package / `dotnet tool`, container images, CI | **Not yet** (built from source today) |
 
 **Verified against** ServiceControl **6.21.0**, on macOS with Docker Desktop (arm64), using real ServiceControl containers, a real NServiceBus 10
 workload and Keycloak 26.
 
+**Also tried by hand** (2026-09-20): the local server used from GitHub Copilot CLI 1.0.86, with authentication disabled, against the Docker Compose
+platform from [Particular/PlatformContainerExamples](https://github.com/Particular/PlatformContainerExamples) and the test workload as a data source.
+This turned up a real incompatibility that the end-to-end tests could not: the MCP SDK describes optional parameters as `"type": ["string", "null"]`, and
+Copilot did not offer the tools that had them (`list_*`, `search_messages`). The server now advertises plain types (`ToolSchemas`), covered by a unit test.
+The full end-to-end suite (48 tests) passed afterwards.
+
 **Known limitations and unverified areas** - please read these before relying on it:
+
+- **Only some MCP clients have been tried.** The tests use the C# MCP client; by hand only Copilot CLI has been used, without authentication. Claude Code,
+  Claude Desktop, VS Code and others may be stricter or looser in ways not yet seen, so please report what you find. The write tools have been exercised by the
+  end-to-end tests, but not yet from a real agent client during manual testing.
+- **`GET /api/my/routes` answers `500` when ServiceControl authentication is disabled** (seen with 6.21.0). The server treats that as "cannot tell" and offers every
+  tool, which is correct, but logs a warning each time tools are listed. It should skip the call when authentication is off; not yet done.
 
 - **Linux is unverified.** The test suite has only been run on macOS. The default test topology shares a folder between the test process and the
   containers, which may hit file-permission differences on Linux; `SCMCP_IT_TRANSPORT=rabbitmq` is the fallback. CI (which would settle this) does not exist yet.
@@ -89,7 +101,7 @@ src/                                            what ships
                                                 RFC 9728 metadata, per-caller identity, startup safety checks
 
 tests/
-├── Cjoergensen.ServiceControl.Mcp.Core.Tests/            175 unit + MCP protocol tests (fake ServiceControl, in-memory client↔server)
+├── Cjoergensen.ServiceControl.Mcp.Core.Tests/            176 unit + MCP protocol tests (fake ServiceControl, in-memory client↔server)
 ├── Cjoergensen.ServiceControl.Mcp.IntegrationTests/      48 end-to-end tests: real containers, real executables, real MCP clients
 ├── Cjoergensen.ServiceControl.Mcp.TestWorkload/          real NServiceBus endpoints that produce failures, heartbeats, sagas, metrics
 └── Shared/TestPki.cs                                     throwaway certificate authority for TLS tests
@@ -525,7 +537,7 @@ still 1 (step 2.3).
 ## Testing
 
 ```bash
-dotnet test --project tests/Cjoergensen.ServiceControl.Mcp.Core.Tests          # 175 unit + MCP protocol tests, no Docker
+dotnet test --project tests/Cjoergensen.ServiceControl.Mcp.Core.Tests          # 176 unit + MCP protocol tests, no Docker
 dotnet test --project tests/Cjoergensen.ServiceControl.Mcp.IntegrationTests    # 48 end-to-end tests, needs Docker
 ```
 
