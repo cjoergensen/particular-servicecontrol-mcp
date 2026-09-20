@@ -43,7 +43,7 @@ Run the HTTP host on your machine against the Azure ServiceControl, and use a sc
 
 ## Phase 3: HTTP host as a Container App
 
-- [ ] **Build and publish an image of the HTTP host** (there is no Dockerfile yet; for example `dotnet publish -t:PublishContainer`) and push it to a registry.
+- [ ] **Image published by the release workflow.** Creating a release builds and publishes the HTTP host image (the workflow and its tag versions are yours to control). Confirm the registry and image name, that the image is `linux/amd64` (what Container Apps runs), that it starts as a non-root user on port 8080, how a release maps to a tag (pin the Container App to a version tag, not `latest`), and how the Container App is given pull access if the registry is private.
 - [ ] **Configure the Container App:** HTTPS ingress, the client secret as a secret (or from Key Vault), `Http__AllowedHosts`, `Http__ResourceUrl` (the public https address), `Http__AllowInsecureTransport=true` (TLS ends at the ingress), `TrustedCaCertificatePath` if needed.
 - [ ] **Health probe** on `/healthz`; the 401 challenge and protected resource metadata work through the ingress and advertise the public address.
 - [ ] **Logs** in Azure show the `AUDIT change:` lines and never a token or secret.
@@ -63,7 +63,7 @@ Entra has no dynamic client registration, so each client needs the pre-registere
 
 - [ ] **Refuse device code in the HTTP host at startup**, with a unit test and an end-to-end check that the server exits with a clear message. (Pending decision.)
 - [ ] **Skip `GET /api/my/routes` when authentication is disabled.** ServiceControl 6.21.0 answers it with `500` in that case; the server falls back to offering every tool but logs a warning on each tool listing. Use `/api/authentication/configuration` (`enabled: false`) to skip the call, with a test.
-- [ ] **Container images and a Dockerfile** for the HTTP host (and the stdio host if wanted), needed for phase 3.
+- [ ] **Connect the HTTP host to the release workflow.** The repository has no container settings committed yet, so the workflow has to supply them. The .NET SDK can build the image without a Dockerfile (`dotnet publish -c Release -r linux-x64 -t:PublishContainer`); decide whether the settings live in the project file or the workflow. Add the stdio host only if wanted.
 - [ ] **Have someone follow the README cold** on the Entra setup, with no help. Note every place they stall and fix the text there.
 - [ ] **Compare the discovery JSON example** in the README with the real `/api/authentication/configuration` response from the Azure ServiceControl.
 - [ ] **Add the demo runner and a manual test guide to the repo** (for example under `samples/`): Particular's compose platform plus a small program over the test workload that produces failures, a failing custom check and a dead heartbeat, with a healthy mode so retries succeed. Today it exists only as a throwaway.
