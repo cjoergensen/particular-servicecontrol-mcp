@@ -128,7 +128,7 @@ public sealed partial class ToolAccess(ServiceControlClient client, TimeProvider
         }
         catch (ServiceControlApiException ex)
         {
-            LogUnknown(ex.Kind.ToString(), ex.Message);
+            LogUnknown(ex.Kind, ex.Message);
 
             // While a sign-in is pending, ask again soon: as soon as the person approves, their real permissions should apply.
             return (AccessSnapshot.Unrestricted, ex.Kind == ServiceControlFailureKind.CredentialsUnavailable ? PendingFor : UnknownFor);
@@ -139,5 +139,5 @@ public sealed partial class ToolAccess(ServiceControlClient client, TimeProvider
     partial void LogNotSupported();
 
     [LoggerMessage(Level = LogLevel.Information, Message = "Could not determine which tools this identity may use ({Kind}); offering all tools. {Message}")]
-    partial void LogUnknown(string kind, string message);
+    partial void LogUnknown(ServiceControlFailureKind kind, string message);
 }

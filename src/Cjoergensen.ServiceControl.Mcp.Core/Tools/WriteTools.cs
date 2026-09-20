@@ -158,7 +158,7 @@ public sealed partial class WriteTools(ServiceControlClient client, IOptions<Ser
     {
         var guid = ParseCustomCheckId(id);
         await client.DeleteCustomCheckAsync(guid, cancellationToken).ConfigureAwait(false);
-        LogWrite("dismiss_custom_check", guid.ToString(), 1);
+        LogWrite("dismiss_custom_check", guid, 1);
         return Accepted("dismiss custom check", id.Trim(), Asynchronous);
     }
 
@@ -230,5 +230,5 @@ public sealed partial class WriteTools(ServiceControlClient client, IOptions<Ser
     }
 
     [LoggerMessage(Level = LogLevel.Information, Message = "Write operation {Operation} on {Target} ({Count} message(s)) sent to ServiceControl")]
-    partial void LogWrite(string operation, string target, long count);
+    partial void LogWrite(string operation, object target, long count);
 }
