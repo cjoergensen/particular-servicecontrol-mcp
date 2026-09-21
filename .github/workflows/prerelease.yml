@@ -1,0 +1,54 @@
+name: Create Release Candidate
+
+on:
+  release:
+    types: [prereleased]
+
+permissions:
+  contents: read
+  packages: write
+  security-events: write
+
+env:
+  IMAGE: ghcr.io/${{ github.repository_owner }}/servicecontrol-mcp-http
+  TAG: ${{ github.event.release.tag_name }}-rc
+
+jobs:
+  build-and-publish:
+    name: Build and push RC image
+    environment: release-candidate
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+
+      - name: Log in to GHCR
+        run: echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u ${{ github.actor }} --password-stdin
+
+      # No QEMU needed: the Dockerfile's build stage stays on --platform=$BUILDPLATFORM and cross-compiles with
+      # `dotnet publish -a $TARGETARCH`, and the chiseled final stage only COPYs, so nothing here is ever emulated.
+      - name: Build and push multi-arch image
+        run: >
+          docker buildx build
+          -f src/Cjoergensen.ServiceControl.Mcp.Http/Dockerfile
+          --platform linux/amd64,linux/arm64
+          -t ${{ env.IMAGE }}:${{ env.TAG }}
+          -t ${{ env.IMAGE }}:rc-latest
+          --push
+          .
+
+      - name: Run Trivy vulnerability scanner
+        uses: aquasecurity/trivy-action@57a97c7e7821a5776cebc9bb87c984fa69cba8f1 # 0.35.0
+        with:
+          image-ref: '${{ env.IMAGE }}:${{ env.TAG }}'
+          format: 'sarif'
+          output: 'trivy-results.sarif'
+
+      - name: Upload Trivy scan results to GitHub Security tab
+        uses: github/codeql-action/upload-sarif@1c5b675653bb5c22dbe9b12b556ec555138e09fd # v4.38.1
+        with:
+          sarif_file: 'trivy-results.sarif'

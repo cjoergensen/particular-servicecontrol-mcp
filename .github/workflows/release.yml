@@ -1,0 +1,62 @@
+name: Create Release
+
+on:
+  release:
+    types: [released]
+
+permissions:
+  contents: read
+  packages: write
+
+env:
+  IMAGE: ghcr.io/${{ github.repository_owner }}/servicecontrol-mcp-http
+
+jobs:
+  release:
+    name: Promote RC to stable
+    environment: production
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+
+      - name: Log in to GHCR
+        run: echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u ${{ github.actor }} --password-stdin
+
+      - name: Check if release is latest
+        id: check-latest
+        run: |
+          set -euo pipefail
+          LATEST=$(gh api \
+            -H "Accept: application/vnd.github+json" \
+            /repos/$GITHUB_REPOSITORY/releases/latest \
+            --jq .tag_name)
+          CURRENT="${{ github.event.release.tag_name }}"
+
+          echo "Latest release is: $LATEST"
+          echo "Current release is: $CURRENT"
+
+          if [ "$LATEST" = "$CURRENT" ]; then
+            echo "is_latest=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "is_latest=false" >> "$GITHUB_OUTPUT"
+          fi
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Promote RC to stable
+        shell: bash
+        run: |
+          set -euo pipefail
+          VER="${{ github.event.release.tag_name }}"
+          RC_TAG="${VER}-rc"
+
+          echo "Promoting ${IMAGE}:${RC_TAG} -> ${IMAGE}:${VER}"
+          # imagetools copies the existing multi-arch manifest list by reference (no rebuild, no re-upload of
+          # layers), unlike `docker pull/tag/push`, which only handles a single-architecture image.
+          docker buildx imagetools create --tag "${IMAGE}:${VER}" "${IMAGE}:${RC_TAG}"
+
+          if [ "${{ steps.check-latest.outputs.is_latest }}" = "true" ]; then
+            echo "Also tagging as latest"
+            docker buildx imagetools create --tag "${IMAGE}:latest" "${IMAGE}:${RC_TAG}"
+          fi
