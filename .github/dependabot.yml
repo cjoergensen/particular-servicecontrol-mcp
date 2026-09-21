@@ -1,0 +1,26 @@
+# Dependabot version updates. (Security alerts and security updates are repository settings.)
+# NuGet versions are centrally managed in Directory.Packages.props, which Dependabot understands.
+version: 2
+updates:
+  - package-ecosystem: nuget
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+    labels: [dependencies]
+    groups:
+      nuget-minor-and-patch:
+        update-types: [minor, patch]
+
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+    labels: [dependencies]
+    groups:
+      github-actions:
+        patterns: ["*"]
+
+  # Add a docker entry here when the repository gets a Dockerfile. The .NET SDK's container publishing has no Dockerfile,
+  # so the base image is covered by image scanning and regular rebuilds instead.

@@ -1,0 +1,50 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    End-to-end tests: a real ServiceControl platform (error, audit and monitoring instances, RavenDB, RabbitMQ) in containers, real NServiceBus
+    endpoints producing data, and the real servicecontrol-mcp executable driven by a real MCP client over stdio.
+    They need a running Docker daemon; see README for running them against an already running platform.
+  -->
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <RootNamespace>Cjoergensen.ServiceControl.Mcp.IntegrationTests</RootNamespace>
+    <IsPackable>false</IsPackable>
+    <NoWarn>$(NoWarn);CA1707;CA1812;CA1861</NoWarn>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Content Include="xunit.runner.json" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Compile Include="..\Shared\TestPki.cs" Link="Platform\TestPki.cs" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Using Include="Xunit" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="xunit.v3.mtp-v2" />
+    <PackageReference Include="ModelContextProtocol" />
+    <PackageReference Include="Testcontainers" />
+    <PackageReference Include="Testcontainers.RabbitMq" />
+    <ProjectReference Include="..\Cjoergensen.ServiceControl.Mcp.TestWorkload\Cjoergensen.ServiceControl.Mcp.TestWorkload.csproj" />
+    <ProjectReference Include="..\..\src\Cjoergensen.ServiceControl.Mcp.Core\Cjoergensen.ServiceControl.Mcp.Core.csproj" />
+    <!-- Built first so the executable the tests launch is current; not referenced as an assembly. -->
+    <ProjectReference Include="..\..\src\Cjoergensen.ServiceControl.Mcp.Stdio\Cjoergensen.ServiceControl.Mcp.Stdio.csproj" ReferenceOutputAssembly="false" />
+    <ProjectReference Include="..\..\src\Cjoergensen.ServiceControl.Mcp.Http\Cjoergensen.ServiceControl.Mcp.Http.csproj" ReferenceOutputAssembly="false" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <AssemblyAttribute Include="System.Reflection.AssemblyMetadataAttribute">
+      <_Parameter1>StdioDll</_Parameter1>
+      <_Parameter2>$([MSBuild]::NormalizePath('$(MSBuildThisFileDirectory)', '..', '..', 'src', 'Cjoergensen.ServiceControl.Mcp.Stdio', 'bin', '$(Configuration)', '$(TargetFramework)', 'Cjoergensen.ServiceControl.Mcp.Stdio.dll'))</_Parameter2>
+    </AssemblyAttribute>
+    <AssemblyAttribute Include="System.Reflection.AssemblyMetadataAttribute">
+      <_Parameter1>HttpDll</_Parameter1>
+      <_Parameter2>$([MSBuild]::NormalizePath('$(MSBuildThisFileDirectory)', '..', '..', 'src', 'Cjoergensen.ServiceControl.Mcp.Http', 'bin', '$(Configuration)', '$(TargetFramework)', 'Cjoergensen.ServiceControl.Mcp.Http.dll'))</_Parameter2>
+    </AssemblyAttribute>
+  </ItemGroup>
+
+</Project>

@@ -1,0 +1,35 @@
+name: End-to-end tests
+
+# The 48 end-to-end tests start real ServiceControl containers (about 7 minutes, needs Docker), so they run on demand and
+# are not a required check. Running them here is also how the Linux question in the README gets settled.
+on:
+  workflow_dispatch:
+    inputs:
+      transport:
+        description: "Message transport for the test platform"
+        type: choice
+        options: [rabbitmq, learning]
+        default: rabbitmq
+
+permissions: {}
+
+jobs:
+  e2e:
+    name: End-to-end
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    permissions:
+      contents: read
+    env:
+      SCMCP_IT_TRANSPORT: ${{ inputs.transport }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
+        with:
+          dotnet-version: 10.0.x
+      - name: Build
+        run: dotnet build -c Release
+      - name: End-to-end tests
+        run: dotnet test --project tests/Cjoergensen.ServiceControl.Mcp.IntegrationTests -c Release --no-build
