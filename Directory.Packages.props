@@ -27,11 +27,11 @@
     <PackageVersion Include="NServiceBus.CustomChecks" Version="6.0.1" />
     <PackageVersion Include="NServiceBus.SagaAudit" Version="6.0.1" />
     <PackageVersion Include="NServiceBus.Metrics.ServiceControl" Version="6.0.1" />
-    <PackageVersion Include="Testcontainers" Version="4.15.0" />
-    <PackageVersion Include="Testcontainers.RabbitMq" Version="4.15.0" />
+    <PackageVersion Include="Testcontainers" Version="4.16.0" />
+    <PackageVersion Include="Testcontainers.RabbitMq" Version="4.16.0" />
 
     <!-- Tests -->
-    <PackageVersion Include="xunit.v3.mtp-v2" Version="4.0.1" />
+    <PackageVersion Include="xunit.v3.mtp-v2" Version="4.0.2" />
     <PackageVersion Include="Microsoft.Extensions.Logging.Console" Version="10.0.12" />
   </ItemGroup>
 
